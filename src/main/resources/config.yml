@@ -1,0 +1,39 @@
+# ImmortalBossAltar 0.1.0
+# Configure the altar with /bossaltar setcenter while standing in the End.
+altar:
+  world: ''
+  center: { x: 0, y: 0, z: 0 }
+  pedestal-material: END_STONE_BRICKS
+  pedestal-offset: 2
+  ritual-seconds: 10
+
+boss:
+  mythicmobs-internal-name: AncientDoomDragon
+  spawn-y-offset: 2.0
+  detection-radius: 24.0
+
+reward:
+  mythicmobs-item-internal-name: EndDoomScoreSword
+  reward-id: ancient_doom_dragon_score
+
+portal:
+  # The plugin snapshots and temporarily hides only the portal blocks it finds
+  # in a 5x5x5 cube around the End exit fountain. It never edits bedrock.
+  scan-radius: 2
+
+messages:
+  prefix: '&5[보스 제단] '
+  end-only: '&c엔드에서만 사용할 수 있습니다.'
+  dragon-not-defeated: '&c현재 바닐라 엔더 드래곤을 먼저 처치해야 합니다.'
+  vanilla-dragon-alive: '&c바닐라 엔더 드래곤이 살아 있어 소환할 수 없습니다.'
+  egg-placed: '&d용의 알이 제단 중앙에 안치되었습니다. 네 방향 받침대에 엔더의 눈을 바치세요.'
+  eye-placed: '&d받침대가 활성화되었습니다. (&f{count}/4&d)'
+  ritual-start: '&5소환 의식이 시작됩니다. 10초 동안 제단을 지켜주세요.'
+  altar-incomplete: '&c용의 알과 네 개의 엔더의 눈을 먼저 준비해야 합니다.'
+  boss-spawned: '&5고대의 파멸룡이 깨어났습니다!'
+  boss-defeated: '&6고대의 파멸룡이 쓰러졌습니다!'
+  reward-received: '&6종언의 심판을 획득했습니다!'
+  no-killer: '&7막타 보상자를 판정하지 못했습니다. 관리자 확인이 필요합니다.'
+  contribution-header: '&5--- 고대의 파멸룡 전투 결과 ---'
+  contribution-line: '&d{player}&7: &f{damage} &7피해 (&f{percent}%&7)'
+  status: '&7제단: &f{altar} &7/ 보스: &f{boss} &7/ 바닐라 처치 기록: &f{defeated}'
