@@ -3,7 +3,7 @@ plugins {
 }
 
 group = 'kr.server'
-version = '0.1.0'
+version = '0.2.0'
 
 repositories {
     mavenCentral()
@@ -11,14 +11,20 @@ repositories {
 }
 
 dependencies {
+    // The plugin uses stable Bukkit/Paper APIs available in 1.21.11 and later.
+    // Compile against this API baseline; run on the server's Paper 26.3 runtime.
     compileOnly 'io.papermc.paper:paper-api:1.21.11-R0.1-SNAPSHOT'
 }
 
 java {
-    toolchain { languageVersion = JavaLanguageVersion.of(21) }
+    toolchain { languageVersion = JavaLanguageVersion.of(25) }
 }
 
- tasks.withType(JavaCompile).configureEach {
+tasks.withType(JavaCompile).configureEach {
     options.encoding = 'UTF-8'
     options.release = 21
+}
+
+jar {
+    archiveBaseName = 'ImmortalBossAltar'
 }

@@ -1,39 +1,54 @@
-# ImmortalBossAltar 0.1.0
-# Configure the altar with /bossaltar setcenter while standing in the End.
+# ImmortalBossAltar 0.2.0
+# setcenter: stand in the End and look directly at the central pillar's
+# top BEDROCK support block, then run /bossaltar setcenter. That bedrock
+# coordinate is stored; the dragon egg is placed in the air block above it.
 altar:
   world: ''
   center: { x: 0, y: 0, z: 0 }
-  pedestal-material: END_STONE_BRICKS
+  pedestal-material: BEDROCK
   pedestal-offset: 2
+  # Pedestal blocks are at the same Y as the egg's block position.
   ritual-seconds: 10
+  require-bedrock-support: true
 
 boss:
   mythicmobs-internal-name: AncientDoomDragon
   spawn-y-offset: 2.0
-  detection-radius: 24.0
+  detection-radius: 32.0
 
 reward:
   mythicmobs-item-internal-name: EndDoomScoreSword
   reward-id: ancient_doom_dragon_score
 
 portal:
-  # The plugin snapshots and temporarily hides only the portal blocks it finds
-  # in a 5x5x5 cube around the End exit fountain. It never edits bedrock.
-  scan-radius: 2
+  scan-radius: 3
 
 messages:
   prefix: '&5[보스 제단] '
   end-only: '&c엔드에서만 사용할 수 있습니다.'
-  dragon-not-defeated: '&c현재 바닐라 엔더 드래곤을 먼저 처치해야 합니다.'
+  center-set: '&a제단 알 위치를 저장했습니다: {x}, {y}, {z}. 중앙 기둥 위 공중 블록입니다.'
+  center-target: '&c중앙 기둥의 맨 위 받침 블록을 바라보고 다시 실행하세요.'
+  structure-invalid: '&c제단 구조가 올바르지 않습니다. 중앙 아래와 동서남북 받침대가 지정된 블록인지 확인하세요.'
+  dragon-not-defeated: '&c바닐라 엔더 드래곤을 먼저 처치해야 합니다.'
   vanilla-dragon-alive: '&c바닐라 엔더 드래곤이 살아 있어 소환할 수 없습니다.'
-  egg-placed: '&d용의 알이 제단 중앙에 안치되었습니다. 네 방향 받침대에 엔더의 눈을 바치세요.'
+  egg-placed: '&d용의 알이 중앙에 안치되었습니다. 네 방향 받침대에 엔더의 눈을 바치세요.'
   eye-placed: '&d받침대가 활성화되었습니다. (&f{count}/4&d)'
-  ritual-start: '&5소환 의식이 시작됩니다. 10초 동안 제단을 지켜주세요.'
+  ritual-start: '&5소환 의식이 시작됩니다. 잠시 기다려 주세요.'
   altar-incomplete: '&c용의 알과 네 개의 엔더의 눈을 먼저 준비해야 합니다.'
   boss-spawned: '&5고대의 파멸룡이 깨어났습니다!'
   boss-defeated: '&6고대의 파멸룡이 쓰러졌습니다!'
   reward-received: '&6종언의 심판을 획득했습니다!'
-  no-killer: '&7막타 보상자를 판정하지 못했습니다. 관리자 확인이 필요합니다.'
+  reward-failed: '&c보상 지급이 실패했습니다. 관리자에게 문의하세요.'
   contribution-header: '&5--- 고대의 파멸룡 전투 결과 ---'
   contribution-line: '&d{player}&7: &f{damage} &7피해 (&f{percent}%&7)'
-  status: '&7제단: &f{altar} &7/ 보스: &f{boss} &7/ 바닐라 처치 기록: &f{defeated}'
+  final-recorded: '&6최종 보스 영구 처치 기록이 저장되었습니다.'
+  already-final: '&c최종 보스는 이미 처치되어 다시 소환할 수 없습니다.'
+  reset-done: '&a제단 준비 상태를 초기화했습니다. 영구 처치 기록은 보존됩니다.'
+  status-header: '&5--- 보스 제단 상태 ---'
+  status-world: '&7월드: &f{world}'
+  status-altar: '&7제단 위치: &f{altar}'
+  status-vanilla: '&7바닐라 엔더 드래곤 처치: &f{vanilla}'
+  status-boss: '&7고대의 파멸룡: &f{boss}'
+  status-final: '&7최종 보스 영구 처치: &f{final}'
+  status-killer: '&7최종 처치자: &f{killer}'
+  status-time: '&7처치 시각: &f{time}'

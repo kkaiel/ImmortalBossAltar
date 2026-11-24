@@ -1,10 +1,10 @@
 name: ImmortalBossAltar
-version: 0.1.0
+version: 0.2.0
 main: kr.server.immortalbossaltar.ImmortalBossAltarPlugin
 api-version: '1.21'
 softdepend: [MythicMobs]
 author: kkaiel
-description: End altar summoning and reward handling for AncientDoomDragon.
+description: End altar summoning, permanent boss completion tracking, and reward handling.
 commands:
   bossaltar:
     description: ImmortalBossAltar administration
