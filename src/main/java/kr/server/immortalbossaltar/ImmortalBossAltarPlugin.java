@@ -17,6 +17,8 @@ import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.EnderDragon;
+import org.bukkit.entity.GlowItemFrame;
+import org.bukkit.entity.ItemFrame;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
 import org.bukkit.entity.Projectile;
@@ -28,8 +30,10 @@ import org.bukkit.event.block.Action;
 import org.bukkit.event.block.BlockPlaceEvent;
 import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
+import org.bukkit.event.entity.EntityDamageEvent;
 import org.bukkit.event.entity.EntityDeathEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
+import org.bukkit.event.player.PlayerInteractEntityEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.inventory.ItemStack;
@@ -82,7 +86,7 @@ public final class ImmortalBossAltarPlugin extends JavaPlugin implements Listene
         if (getCommand("bossaltar") != null) getCommand("bossaltar").setExecutor(this);
         getServer().getPluginManager().registerEvents(this, this);
         recoverAfterEnable();
-        getLogger().info("ImmortalBossAltar 0.4.1 enabled. Persistent final-boss record: " + finalBossDefeated);
+        getLogger().info("ImmortalBossAltar 0.4.2 enabled. Persistent final-boss record: " + finalBossDefeated);
     }
 
     @Override public void onDisable() {
@@ -232,6 +236,7 @@ public final class ImmortalBossAltarPlugin extends JavaPlugin implements Listene
         sender.sendMessage(color("status-altar", Map.of("altar", altar)));
         if (c != null) {
             sender.sendMessage(color("status-pedestals", Map.of("pedestals", validateAltarStructure(c) ? "4곳 확인 완료" : "미확인 방향: " + missingPedestalDirections(c))));
+            sender.sendMessage("§7제물 발광 액자: §f" + readyPedestalFrameCount(c) + "/4곳 (엔더의 눈 확인)");
             for (String direction : List.of("N", "E", "S", "W")) {
                 Location pedestal = getPedestalLocation(direction);
                 String value = pedestal == null ? "미발견" : pedestal.getBlockX() + "," + pedestal.getBlockY() + "," + pedestal.getBlockZ()
@@ -285,20 +290,41 @@ public final class ImmortalBossAltarPlugin extends JavaPlugin implements Listene
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
     public void onEggInteract(PlayerInteractEvent event) {
         if (event.getAction() != Action.LEFT_CLICK_BLOCK && event.getAction() != Action.RIGHT_CLICK_BLOCK) return;
-        if (event.getClickedBlock() == null) return;
+        if (event.getHand() != EquipmentSlot.HAND || event.getClickedBlock() == null) return;
         Location c = center();
         if (c == null) return;
         Block egg = c.getBlock().getRelative(BlockFace.UP);
-        if (sameBlock(event.getClickedBlock(), egg)) {
-            event.setCancelled(true);
-            event.setUseInteractedBlock(org.bukkit.event.Event.Result.DENY);
-            event.setUseItemInHand(org.bukkit.event.Event.Result.DENY);
+        if (!sameBlock(event.getClickedBlock(), egg) || egg.getType() != Material.DRAGON_EGG) return;
+
+        // The altar egg never uses vanilla teleport behavior.
+        event.setCancelled(true);
+        event.setUseInteractedBlock(org.bukkit.event.Event.Result.DENY);
+        event.setUseItemInHand(org.bukkit.event.Event.Result.DENY);
+
+        if (event.getAction() == Action.RIGHT_CLICK_BLOCK) {
+            event.getPlayer().sendMessage("§e제단의 용의 알은 우클릭 상호작용이 비활성화되어 있습니다. 회수하려면 좌클릭하세요.");
+            return;
         }
+
+        // Left-click retrieves exactly one egg directly to the player's inventory.
+        cancelRitual();
+        egg.setType(Material.AIR, false);
+        Player player = event.getPlayer();
+        Map<Integer, ItemStack> overflow = player.getInventory().addItem(new ItemStack(Material.DRAGON_EGG, 1));
+        for (ItemStack item : overflow.values()) player.getWorld().dropItemNaturally(player.getLocation(), item);
+
+        if (eggDepositor != null) escrowEggs.remove(eggDepositor);
+        eggPrepared = false;
+        eggDepositor = null;
+        summonPromptSent = false;
+        savePersistentData();
+        player.sendMessage("§a용의 알을 회수하여 인벤토리로 돌려받았습니다. 받침대의 제물 액자는 그대로 유지됩니다.");
     }
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
     public void onInteract(PlayerInteractEvent event) {
-        if (event.getAction() != Action.RIGHT_CLICK_BLOCK || event.getClickedBlock() == null || event.getHand() != EquipmentSlot.HAND) return;
+        if (event.getAction() != Action.RIGHT_CLICK_BLOCK || event.getClickedBlock() == null
+                || event.getHand() != EquipmentSlot.HAND) return;
         Location c = center();
         if (c == null) return;
         Block clicked = event.getClickedBlock();
@@ -309,24 +335,28 @@ public final class ImmortalBossAltarPlugin extends JavaPlugin implements Listene
         Block eggBlock = c.getBlock().getRelative(BlockFace.UP);
         boolean centerClicked = sameBlock(clicked, c.getBlock());
         boolean eggClicked = sameBlock(clicked, eggBlock);
-        String direction = pedestalDirection(clicked.getLocation(), c, 0);
-        boolean pedestalClicked = direction != null;
 
         if (finalBossDefeated) {
-            if (centerClicked || eggClicked || pedestalClicked) {
+            if (centerClicked || eggClicked || pedestalDirection(clicked.getLocation(), c, 0) != null) {
                 event.setCancelled(true);
+                event.setUseInteractedBlock(org.bukkit.event.Event.Result.DENY);
+                event.setUseItemInHand(org.bukkit.event.Event.Result.DENY);
                 msg(player, "already-final");
             }
             return;
         }
         if (activeBoss != null || ritualRunning) {
-            if (centerClicked || eggClicked || pedestalClicked) {
+            if (centerClicked || eggClicked || pedestalDirection(clicked.getLocation(), c, 0) != null) {
                 event.setCancelled(true);
+                event.setUseInteractedBlock(org.bukkit.event.Event.Result.DENY);
+                event.setUseItemInHand(org.bukkit.event.Event.Result.DENY);
                 player.sendMessage("§c보스 소환 또는 전투가 진행 중입니다.");
             }
             return;
         }
 
+        // The actual egg block is handled by onEggInteract. Never allow a
+        // right-click on the egg to pass through to vanilla.
         if (eggClicked) {
             event.setCancelled(true);
             event.setUseInteractedBlock(org.bukkit.event.Event.Result.DENY);
@@ -334,76 +364,164 @@ public final class ImmortalBossAltarPlugin extends JavaPlugin implements Listene
             return;
         }
 
-        // Always reserve the centerpiece slot: no other item/block can be placed there.
-        if (centerClicked) {
-            event.setCancelled(true);
-            event.setUseInteractedBlock(org.bukkit.event.Event.Result.DENY);
-            event.setUseItemInHand(org.bukkit.event.Event.Result.DENY);
+        // Only the central BEDROCK is used to place the dragon egg.
+        // Cardinal pedestals are intentionally left interactive so players can
+        // place glow item frames on them; offerings are inserted into the frames.
+        if (!centerClicked) return;
 
-            if (eggPrepared) {
-                player.sendMessage("§e이미 제단 중앙에 용의 알이 준비되어 있습니다.");
-                return;
-            }
-            if (player.getInventory().getItemInMainHand().getType() != Material.DRAGON_EGG) {
-                player.sendMessage("§c중앙 받침대를 우클릭할 때는 용의 알을 들어야 합니다.");
-                return;
-            }
-            if (!vanillaDragonDefeated || hasLivingVanillaDragon(c.getWorld())) {
-                msg(player, "dragon-not-defeated");
-                return;
-            }
-            if (!validateAltarStructure(c)) {
-                msg(player, "structure-invalid");
-                return;
-            }
-
-            ItemStack hand = player.getInventory().getItemInMainHand();
-            if (hand.getAmount() <= 1) player.getInventory().setItemInMainHand(null);
-            else hand.setAmount(hand.getAmount() - 1);
-
-            eggBlock.setType(Material.DRAGON_EGG, false);
-            eggPrepared = true;
-            eggDepositor = player.getUniqueId();
-            escrowEggs.merge(player.getUniqueId(), 1, Integer::sum);
-            savePersistentData();
-            msg(player, "egg-reserved");
-            showSummonPromptIfReady(player);
-            return;
-        }
-
-        if (!pedestalClicked) return;
         event.setCancelled(true);
         event.setUseInteractedBlock(org.bukkit.event.Event.Result.DENY);
         event.setUseItemInHand(org.bukkit.event.Event.Result.DENY);
 
-        if (usedPedestals.contains(direction)) {
-            player.sendMessage("§e이미 활성화된 받침대입니다.");
+        if (eggPrepared || eggBlock.getType() == Material.DRAGON_EGG) {
+            player.sendMessage("§e이미 제단 중앙에 용의 알이 준비되어 있습니다.");
             return;
         }
-        Material required = Material.matchMaterial(getConfig().getString("altar.pedestal-material", "BEDROCK"));
-        if (required == null || clicked.getType() != required) {
-            player.sendMessage("§c받침대 블록이 설정과 일치하지 않습니다.");
+        if (player.getInventory().getItemInMainHand().getType() != Material.DRAGON_EGG) {
+            player.sendMessage("§c중앙 기반암을 우클릭할 때는 용의 알을 들어야 합니다.");
             return;
         }
-        if (!eggPrepared || eggBlock.getType() != Material.DRAGON_EGG) {
-            msg(player, "altar-incomplete");
+        if (!vanillaDragonDefeated || hasLivingVanillaDragon(c.getWorld())) {
+            msg(player, "dragon-not-defeated");
             return;
         }
-        ItemStack hand = player.getInventory().getItemInMainHand();
-        if (hand.getType() != Material.ENDER_EYE) {
-            player.sendMessage("§c엔더의 눈만 제단에 바칠 수 있습니다.");
+        if (!validateAltarStructure(c)) {
+            msg(player, "structure-invalid");
             return;
         }
 
+        ItemStack hand = player.getInventory().getItemInMainHand();
         if (hand.getAmount() <= 1) player.getInventory().setItemInMainHand(null);
         else hand.setAmount(hand.getAmount() - 1);
-        usedPedestals.add(direction);
-        pedestalDepositors.put(direction, player.getUniqueId());
-        escrowEyes.merge(player.getUniqueId(), 1, Integer::sum);
+
+        eggBlock.setType(Material.DRAGON_EGG, false);
+        eggPrepared = true;
+        eggDepositor = player.getUniqueId();
+        escrowEggs.merge(player.getUniqueId(), 1, Integer::sum);
         savePersistentData();
-        clicked.getWorld().spawnParticle(Particle.PORTAL, clicked.getLocation().add(.5, 1, .5), 45, .35, .5, .35, .08);
-        msg(player, "eye-reserved", Map.of("count", String.valueOf(usedPedestals.size())));
+        msg(player, "egg-reserved");
         showSummonPromptIfReady(player);
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
+    public void onPedestalFrameInteract(PlayerInteractEntityEvent event) {
+        if (!(event.getRightClicked() instanceof GlowItemFrame frame)) return;
+        String direction = pedestalFrameDirection(frame);
+        if (direction == null) return;
+
+        ItemStack displayed = frame.getItem();
+        if (displayed.getType() == Material.ENDER_EYE) {
+            // Once an Eye is offered, it cannot be taken back or rotated out.
+            event.setCancelled(true);
+            event.getPlayer().sendMessage("§e이 받침대에는 엔더의 눈이 이미 봉헌되어 있습니다.");
+            return;
+        }
+
+        if (displayed.getType() == Material.AIR) {
+            if (event.getPlayer().getInventory().getItemInMainHand().getType() != Material.ENDER_EYE) {
+                event.setCancelled(true);
+                event.getPlayer().sendMessage("§c발광 아이템 액자에는 엔더의 눈만 넣을 수 있습니다.");
+                return;
+            }
+            // Let vanilla put the Eye into the frame, then validate all four
+            // frames on the next tick after the entity has updated.
+            Player offeringPlayer = event.getPlayer();
+            Bukkit.getScheduler().runTask(this, () -> {
+                if (frame.isValid() && frame.getItem().getType() == Material.ENDER_EYE) {
+                    msg(offeringPlayer, "eye-reserved",
+                            Map.of("count", String.valueOf(readyPedestalFrameCount(center()))));
+                    showSummonPromptIfReady(offeringPlayer);
+                }
+            });
+            return;
+        }
+
+        // Reject and return any non-Eye item already placed in a pedestal frame.
+        event.setCancelled(true);
+        ItemStack rejected = displayed.clone();
+        frame.setItem(new ItemStack(Material.AIR), false);
+        Map<Integer, ItemStack> overflow = event.getPlayer().getInventory().addItem(rejected);
+        for (ItemStack item : overflow.values()) {
+            event.getPlayer().getWorld().dropItemNaturally(event.getPlayer().getLocation(), item);
+        }
+        event.getPlayer().sendMessage("§e엔더의 눈이 아닌 제물은 허용되지 않아 회수했습니다.");
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
+    public void onPedestalFrameDamage(EntityDamageEvent event) {
+        if (event.getEntity() instanceof GlowItemFrame frame && pedestalFrameDirection(frame) != null) {
+            event.setCancelled(true);
+        }
+    }
+
+    private String pedestalFrameDirection(GlowItemFrame frame) {
+        Location frameLocation = frame.getLocation();
+        Location c = center();
+        if (c == null || !frameLocation.getWorld().getUID().equals(c.getWorld().getUID())) return null;
+
+        // Hanging-entity coordinates are positioned on the supporting block's
+        // face, so deriving the support block by flooring the entity location
+        // is unreliable (especially for top-mounted frames). Match the frame
+        // to the exact configured pedestal by its distance from that block's
+        // center instead. Pedestals are separated far enough that the 0.75
+        // squared-distance limit cannot overlap neighboring directions.
+        for (String direction : List.of("N", "E", "S", "W")) {
+            Location pedestal = getPedestalLocation(direction);
+            if (pedestal == null || !pedestal.getWorld().getUID().equals(frameLocation.getWorld().getUID())) continue;
+            Location blockCenter = pedestal.clone().add(.5, .5, .5);
+            if (frameLocation.distanceSquared(blockCenter) <= 0.75) return direction;
+        }
+        return null;
+    }
+
+    private List<GlowItemFrame> framesOnPedestal(String direction) {
+        Location pedestal = getPedestalLocation(direction);
+        if (pedestal == null || pedestal.getWorld() == null) return List.of();
+        List<GlowItemFrame> found = new ArrayList<>();
+        for (Entity entity : pedestal.getWorld().getNearbyEntities(pedestal.clone().add(.5, .5, .5), 1.25, 1.25, 1.25)) {
+            if (entity instanceof GlowItemFrame frame && direction.equals(pedestalFrameDirection(frame))) {
+                found.add(frame);
+            }
+        }
+        return found;
+    }
+
+    private boolean pedestalFrameReady(String direction) {
+        List<GlowItemFrame> frames = framesOnPedestal(direction);
+        return frames.size() == 1 && frames.get(0).getItem().getType() == Material.ENDER_EYE;
+    }
+
+    private int readyPedestalFrameCount(Location c) {
+        int count = 0;
+        for (String direction : List.of("N", "E", "S", "W")) {
+            if (pedestalFrameReady(direction)) count++;
+        }
+        return count;
+    }
+
+    private String missingFrameDirections() {
+        List<String> missing = new ArrayList<>();
+        for (String direction : List.of("N", "E", "S", "W")) {
+            List<GlowItemFrame> frames = framesOnPedestal(direction);
+            if (frames.isEmpty()) missing.add(direction + ": 발광 액자 없음");
+            else if (frames.size() != 1) missing.add(direction + ": 액자 중복");
+            else if (frames.get(0).getItem().getType() != Material.ENDER_EYE) missing.add(direction + ": 엔더의 눈 없음");
+        }
+        return missing.isEmpty() ? "없음" : String.join(", ", missing);
+    }
+
+    private boolean consumePedestalFrames() {
+        Location c = center();
+        if (c == null) return false;
+        List<GlowItemFrame> toRemove = new ArrayList<>();
+        for (String direction : List.of("N", "E", "S", "W")) {
+            List<GlowItemFrame> frames = framesOnPedestal(direction);
+            if (frames.size() != 1 || frames.get(0).getItem().getType() != Material.ENDER_EYE) return false;
+            toRemove.add(frames.get(0));
+        }
+        // Removing the GlowItemFrame entity also consumes the Eye displayed in it.
+        for (GlowItemFrame frame : toRemove) frame.remove();
+        return true;
     }
 
     private boolean sameBlock(Block a, Block b) {
@@ -415,7 +533,7 @@ public final class ImmortalBossAltarPlugin extends JavaPlugin implements Listene
     public void onPlayerJoin(PlayerJoinEvent event) { refundEscrowFor(event.getPlayer().getUniqueId()); }
 
     private void showSummonPromptIfReady(Player player) {
-        if (summonPromptSent || !eggPrepared || usedPedestals.size() != 4 || activeBoss != null || finalBossDefeated) return;
+        if (summonPromptSent || !eggPrepared || activeBoss != null || finalBossDefeated || !hasAllReservedMaterials()) return;
         summonPromptSent = true;
         player.sendMessage(Component.text("[불멸의 제단] ", NamedTextColor.DARK_PURPLE)
                 .append(Component.text("제단이 준비되었습니다! ", NamedTextColor.GREEN))
@@ -526,13 +644,23 @@ public final class ImmortalBossAltarPlugin extends JavaPlugin implements Listene
 
     private void beginRitual(Player initiator) {
         if (ritualRunning || activeBoss != null || finalBossDefeated) return;
-        if (!vanillaDragonDefeated || hasLivingVanillaDragon(initiator.getWorld())) { msg(initiator, "vanilla-dragon-alive"); return; }
-        if (!hasAllReservedMaterials()) { msg(initiator, "reservation-missing"); clearPreparation(true); return; }
+        Location altar = center();
+        if (altar == null || !initiator.getWorld().getUID().equals(altar.getWorld().getUID())) {
+            initiator.sendMessage("§c제단이 있는 엔드 월드에서 소환 버튼을 눌러야 합니다.");
+            return;
+        }
+        if (!vanillaDragonDefeated || hasLivingVanillaDragon(altar.getWorld())) { msg(initiator, "vanilla-dragon-alive"); return; }
+        if (!hasAllReservedMaterials()) {
+            initiator.sendMessage("§c소환 조건이 부족합니다. " + missingFrameDirections());
+            if (!eggPrepared || altar.getBlock().getRelative(BlockFace.UP).getType() != Material.DRAGON_EGG)
+                initiator.sendMessage("§c중앙 제단에 용의 알이 설치되어 있지 않습니다.");
+            return;
+        }
         ritualRunning = true; msg(initiator, "ritual-start");
         ritualTask = Bukkit.getScheduler().runTaskLater(this, () -> {
             ritualRunning = false;
             Location c = center();
-            if (c == null || finalBossDefeated || !eggPrepared || usedPedestals.size() != 4
+            if (c == null || finalBossDefeated || !eggPrepared
                     || hasLivingVanillaDragon(c.getWorld()) || !validateAltarStructureWithEgg(c)
                     || !hasAllReservedMaterials()) {
                 getLogger().warning("소환 조건이 변경되어 의식을 취소했습니다. 예약 재료는 인벤토리에 남아 있습니다.");
@@ -591,8 +719,8 @@ public final class ImmortalBossAltarPlugin extends JavaPlugin implements Listene
             boss.getPersistentDataContainer().set(bossKey, PersistentDataType.BYTE, (byte) 1);
             savePersistentData();
 
-            if (!hasAllReservedMaterials() || !consumeReservedMaterials()) {
-                getLogger().severe("보스 생성 후 예약 재료를 확인/소비하지 못했습니다. 해당 보스를 제거합니다.");
+            if (!hasAllReservedMaterials() || !consumePedestalFrames() || !consumeReservedMaterials()) {
+                getLogger().severe("보스 생성 후 제단 제물을 확인/소비하지 못했습니다. 해당 보스를 제거합니다.");
                 boss.remove();
                 activeBoss = null;
                 savePersistentData();
@@ -699,21 +827,26 @@ public final class ImmortalBossAltarPlugin extends JavaPlugin implements Listene
         return count;
     }
 
-    private Map<UUID, Integer> reservedEyeCounts() { return new HashMap<>(escrowEyes); }
-
     private boolean hasAllReservedMaterials() {
-        if (!eggPrepared || eggDepositor == null || usedPedestals.size() != 4 || pedestalDepositors.size() != 4) return false;
-        int totalEyes = escrowEyes.values().stream().mapToInt(Integer::intValue).sum();
+        Location c = center();
+        if (!eggPrepared || eggDepositor == null || c == null
+                || c.getBlock().getRelative(BlockFace.UP).getType() != Material.DRAGON_EGG) return false;
         int totalEggs = escrowEggs.values().stream().mapToInt(Integer::intValue).sum();
-        return totalEggs == 1 && totalEyes == 4;
+        if (totalEggs != 1) return false;
+        for (String direction : List.of("N", "E", "S", "W")) {
+            if (!pedestalFrameReady(direction)) return false;
+        }
+        return true;
     }
 
     private boolean consumeReservedMaterials() {
-        if (!hasAllReservedMaterials()) return false;
-        // Offered items were removed at the moment of offering. Successful spawn
-        // commits escrow by clearing the refund ledger; never remove them twice.
+        if (!eggPrepared || center() == null
+                || center().getBlock().getRelative(BlockFace.UP).getType() != Material.DRAGON_EGG) return false;
+        int totalEggs = escrowEggs.values().stream().mapToInt(Integer::intValue).sum();
+        if (totalEggs != 1) return false;
+        // The four glow frames and the Eyes inside them are removed separately
+        // only after a newly spawned MythicMobs boss has been identified.
         escrowEggs.clear();
-        escrowEyes.clear();
         savePersistentData();
         return true;
     }
