@@ -1,5 +1,5 @@
 name: ImmortalBossAltar
-version: 0.3.0
+version: 0.4.0
 main: kr.server.immortalbossaltar.ImmortalBossAltarPlugin
 api-version: '1.21'
 softdepend: [MythicMobs]
@@ -8,8 +8,7 @@ description: End altar summoning, permanent boss completion tracking, and reward
 commands:
   bossaltar:
     description: ImmortalBossAltar administration
-    usage: /bossaltar <setcenter|status|reset|reload>
-    permission: immortalbossaltar.admin
+    usage: /bossaltar <setcenter|status|reset|reload|summon>
 permissions:
   immortalbossaltar.admin:
     default: op
