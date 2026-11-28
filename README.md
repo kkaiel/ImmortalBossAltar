@@ -1,4 +1,4 @@
-# ImmortalBossAltar 0.2.1
+# ImmortalBossAltar 0.3.0
 
 Separate Paper plugin for the End altar and MythicMobs `AncientDoomDragon` encounter.
 
@@ -12,7 +12,7 @@ Separate Paper plugin for the End altar and MythicMobs `AncientDoomDragon` encou
 ## Install
 
 1. Build with `gradle clean build` or download the Actions artifact.
-2. Put `build/libs/ImmortalBossAltar-0.2.1.jar` into `plugins/`.
+2. Put `build/libs/ImmortalBossAltar-0.3.0.jar` into `plugins/`.
 3. Ensure MythicMobs loads the existing `AncientDoomDragon` mob and `EndDoomScoreSword` item.
 4. Restart the server.
 
@@ -41,3 +41,8 @@ If `/bossaltar setcenter` cannot find all four pedestals, do not force the ritua
 ## Important testing notes
 
 This source revision has not been compiled against the user's exact Paper 26.3 server or tested with their MythicMobs installation. Treat it as a development build. First test on a backup/test server. Verify the actual fountain geometry and portal restoration before any live use. Ritual deposits are not yet an escrow/refund transaction: do not begin a summon test until this is explicitly completed and reviewed.
+
+
+## 0.3.0 material reservation safety
+
+Dragon Egg and Eyes of Ender are reserved in player inventories and are not removed when offered. They are consumed only after exactly one newly spawned MythicMobs Ender Dragon is detected and all reserving players are online with the required items. If the ritual is cancelled, the plugin is disabled/restarted, or spawn detection fails, the visual egg/preparation is cleared and the items remain with their owners.

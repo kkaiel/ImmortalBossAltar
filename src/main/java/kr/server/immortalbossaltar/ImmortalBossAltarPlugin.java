@@ -53,6 +53,9 @@ public final class ImmortalBossAltarPlugin extends JavaPlugin implements Listene
     private UUID lastDamager;
     private boolean vanillaDragonDefeated;
     private boolean eggPrepared;
+    // Materials are reserved in player inventories until a successful boss spawn is confirmed.
+    private UUID eggDepositor;
+    private final Map<String, UUID> pedestalDepositors = new HashMap<>();
     private boolean ritualRunning;
     private boolean portalSuppressed;
     private boolean finalBossDefeated;
@@ -69,11 +72,13 @@ public final class ImmortalBossAltarPlugin extends JavaPlugin implements Listene
         if (getCommand("bossaltar") != null) getCommand("bossaltar").setExecutor(this);
         getServer().getPluginManager().registerEvents(this, this);
         recoverAfterEnable();
-        getLogger().info("ImmortalBossAltar 0.2.0 enabled. Persistent final-boss record: " + finalBossDefeated);
+        getLogger().info("ImmortalBossAltar 0.3.0 enabled. Persistent final-boss record: " + finalBossDefeated);
     }
 
     @Override public void onDisable() {
         if (ritualTask != null) ritualTask.cancel();
+        // Offered materials remain in player inventories until spawn confirmation.
+        clearPreparation(true);
         // Keep a suppressed portal suppressed while the tracked boss is alive.
         // If there is no active boss, restore it to avoid leaving the exit broken.
         if (activeBoss == null && portalSuppressed) restorePortal();
@@ -119,6 +124,9 @@ public final class ImmortalBossAltarPlugin extends JavaPlugin implements Listene
     }
 
     private void recoverAfterEnable() {
+        // In-progress offerings are not persisted across restart. They were not consumed,
+        // so clear only the visual egg and return the altar to idle.
+        if (activeBoss == null) clearPreparation(true);
         if (activeBoss != null) {
             EnderDragon found = findDragon(activeBoss);
             if (found == null || found.isDead() || !found.isValid()) {
@@ -127,6 +135,11 @@ public final class ImmortalBossAltarPlugin extends JavaPlugin implements Listene
                 getLogger().warning("저장된 보스 UUID가 월드에서 발견되지 않아 전투 상태를 정리했습니다.");
             } else {
                 found.getPersistentDataContainer().set(bossKey, PersistentDataType.BYTE, (byte) 1);
+                clearPreparation(true);
+                if (!portalSuppressed) {
+                    Location c = center();
+                    if (c != null) suppressPortal(c);
+                }
                 getLogger().warning("진행 중인 커스텀 보스를 다시 추적합니다. UUID=" + activeBoss);
             }
         } else if (portalSuppressed) {
@@ -172,8 +185,7 @@ public final class ImmortalBossAltarPlugin extends JavaPlugin implements Listene
                 if (!sender.hasPermission("immortalbossaltar.admin")) { sender.sendMessage("§c권한이 없습니다."); return true; }
                 if (finalBossDefeated) { sender.sendMessage("§c최종 보스 영구 처치 기록이 있어 제단을 초기화할 수 없습니다."); return true; }
                 if (activeBoss != null) { sender.sendMessage("§c보스가 살아 있는 동안 초기화할 수 없습니다."); return true; }
-                cancelRitual(); eggPrepared = false; usedPedestals.clear(); damage.clear(); lastDamager = null;
-                Location c = center(); if (c != null && c.getBlock().getType() == Material.DRAGON_EGG) c.getBlock().setType(Material.AIR, false);
+                cancelRitual(); clearPreparation(true); damage.clear(); lastDamager = null;
                 savePersistentData(); msg(sender, "reset-done");
             }
             case "reload" -> {
@@ -245,8 +257,11 @@ public final class ImmortalBossAltarPlugin extends JavaPlugin implements Listene
                 event.setCancelled(true);
                 if (!vanillaDragonDefeated || hasLivingVanillaDragon(c.getWorld())) { msg(player, "dragon-not-defeated"); return; }
                 if (!validateAltarStructure(c)) { msg(player, "structure-invalid"); return; }
-                if (!takeOne(player, Material.DRAGON_EGG)) return;
-                eggBlock.setType(Material.DRAGON_EGG, false); eggPrepared = true; msg(player, "egg-placed");
+                if (!hasItems(player, Material.DRAGON_EGG, 1)) return;
+                eggBlock.setType(Material.DRAGON_EGG, false);
+                eggPrepared = true;
+                eggDepositor = player.getUniqueId();
+                msg(player, "egg-reserved");
                 return;
             }
         }
@@ -256,11 +271,12 @@ public final class ImmortalBossAltarPlugin extends JavaPlugin implements Listene
         if (pedestal == null || clicked.getType() != pedestal || player.getInventory().getItemInMainHand().getType() != Material.ENDER_EYE) return;
         event.setCancelled(true);
         if (!eggPrepared) { msg(player, "altar-incomplete"); return; }
-        if (takeOne(player, Material.ENDER_EYE)) {
-            usedPedestals.add(direction);
-            clicked.getWorld().spawnParticle(Particle.PORTAL, clicked.getLocation().add(.5, 1, .5), 45, .35, .5, .35, .08);
-            msg(player, "eye-placed", Map.of("count", String.valueOf(usedPedestals.size())));
-        }
+        int alreadyReserved = reservedEyeCounts().getOrDefault(player.getUniqueId(), 0);
+        if (!hasItems(player, Material.ENDER_EYE, alreadyReserved + 1)) return;
+        usedPedestals.add(direction);
+        pedestalDepositors.put(direction, player.getUniqueId());
+        clicked.getWorld().spawnParticle(Particle.PORTAL, clicked.getLocation().add(.5, 1, .5), 45, .35, .5, .35, .08);
+        msg(player, "eye-reserved", Map.of("count", String.valueOf(usedPedestals.size())));
     }
 
     private boolean isAltarRelated(Location l, Location c) {
@@ -337,12 +353,17 @@ public final class ImmortalBossAltarPlugin extends JavaPlugin implements Listene
     private void beginRitual(Player initiator) {
         if (ritualRunning || activeBoss != null || finalBossDefeated) return;
         if (!vanillaDragonDefeated || hasLivingVanillaDragon(initiator.getWorld())) { msg(initiator, "vanilla-dragon-alive"); return; }
+        if (!hasAllReservedMaterials()) { msg(initiator, "reservation-missing"); clearPreparation(true); return; }
         ritualRunning = true; msg(initiator, "ritual-start");
         ritualTask = Bukkit.getScheduler().runTaskLater(this, () -> {
             ritualRunning = false;
             Location c = center();
-            if (c == null || finalBossDefeated || !eggPrepared || usedPedestals.size() != 4 || hasLivingVanillaDragon(c.getWorld()) || !validateAltarStructureWithEgg(c)) {
-                getLogger().warning("소환 조건이 변경되어 의식을 취소했습니다. 재료는 자동 환불되지 않으므로 관리자 확인이 필요합니다.");
+            if (c == null || finalBossDefeated || !eggPrepared || usedPedestals.size() != 4
+                    || hasLivingVanillaDragon(c.getWorld()) || !validateAltarStructureWithEgg(c)
+                    || !hasAllReservedMaterials()) {
+                getLogger().warning("소환 조건이 변경되어 의식을 취소했습니다. 예약 재료는 인벤토리에 남아 있습니다.");
+                if (c != null) msg(initiator, "ritual-cancelled-safe");
+                clearPreparation(true);
                 return;
             }
             spawnMythicBoss(c);
@@ -355,22 +376,59 @@ public final class ImmortalBossAltarPlugin extends JavaPlugin implements Listene
     }
 
     private void spawnMythicBoss(Location c) {
-        if (Bukkit.getPluginManager().getPlugin("MythicMobs") == null) { getLogger().severe("MythicMobs가 없어 보스를 소환할 수 없습니다."); return; }
+        if (Bukkit.getPluginManager().getPlugin("MythicMobs") == null) {
+            getLogger().severe("MythicMobs가 없어 보스를 소환할 수 없습니다.");
+            clearPreparation(true);
+            return;
+        }
+        if (!hasAllReservedMaterials()) {
+            getLogger().warning("소환 직전 예약 재료가 부족하여 취소했습니다.");
+            clearPreparation(true);
+            return;
+        }
         Set<UUID> before = new HashSet<>();
-        for (Entity e : c.getWorld().getNearbyEntities(c, 40, 40, 40)) if (e instanceof EnderDragon) before.add(e.getUniqueId());
+        for (Entity e : c.getWorld().getNearbyEntities(c, 40, 40, 40))
+            if (e instanceof EnderDragon) before.add(e.getUniqueId());
+
         String mob = getConfig().getString("boss.mythicmobs-internal-name", "AncientDoomDragon");
         Location spawn = c.clone().add(.5, getConfig().getDouble("boss.spawn-y-offset", 2.0), .5);
         String loc = c.getWorld().getName() + "," + spawn.getX() + "," + spawn.getY() + "," + spawn.getZ();
-        Bukkit.dispatchCommand(Bukkit.getConsoleSender(), "mm mobs spawn " + mob + " 1 " + loc);
+        boolean dispatched = Bukkit.dispatchCommand(Bukkit.getConsoleSender(), "mm mobs spawn " + mob + " 1 " + loc);
+        if (!dispatched) {
+            getLogger().severe("MythicMobs 소환 명령 실행에 실패했습니다.");
+            clearPreparation(true);
+            return;
+        }
         Bukkit.getScheduler().runTaskLater(this, () -> {
             List<EnderDragon> found = c.getWorld().getNearbyEntities(c, 40, 40, 40).stream()
                     .filter(e -> e instanceof EnderDragon).map(e -> (EnderDragon) e)
                     .filter(e -> !before.contains(e.getUniqueId())).toList();
-            if (found.size() != 1) { getLogger().severe("새로 생성된 엔더 드래곤을 하나로 특정하지 못했습니다. 발견 수=" + found.size()); return; }
+            if (found.size() != 1) {
+                getLogger().severe("새로 생성된 엔더 드래곤을 하나로 특정하지 못했습니다. 발견 수=" + found.size()
+                        + ". 예약 재료는 소비하지 않았습니다.");
+                clearPreparation(true);
+                return;
+            }
             EnderDragon boss = found.get(0);
-            activeBoss = boss.getUniqueId(); boss.getPersistentDataContainer().set(bossKey, PersistentDataType.BYTE, (byte) 1);
-            eggPrepared = false; usedPedestals.clear(); c.getBlock().getRelative(BlockFace.UP).setType(Material.AIR, false);
-            suppressPortal(c); savePersistentData();
+            // Persist boss ownership before consuming any offered materials. If the
+            // server crashes at this boundary, the boss is recoverable and the
+            // players' items are still safe (at worst the summon is unpaid).
+            activeBoss = boss.getUniqueId();
+            boss.getPersistentDataContainer().set(bossKey, PersistentDataType.BYTE, (byte) 1);
+            savePersistentData();
+
+            if (!hasAllReservedMaterials() || !consumeReservedMaterials()) {
+                getLogger().severe("보스 생성 후 예약 재료를 확인/소비하지 못했습니다. 해당 보스를 제거합니다.");
+                boss.remove();
+                activeBoss = null;
+                savePersistentData();
+                clearPreparation(true);
+                return;
+            }
+
+            clearPreparation(true);
+            suppressPortal(c);
+            savePersistentData();
             for (Player p : c.getWorld().getPlayers()) msg(p, "boss-spawned");
         }, 3L);
     }
@@ -453,11 +511,66 @@ public final class ImmortalBossAltarPlugin extends JavaPlugin implements Listene
         return null;
     }
 
-    private boolean takeOne(Player player, Material type) {
-        ItemStack hand = player.getInventory().getItemInMainHand();
-        if (hand.getType() != type || hand.getAmount() < 1) return false;
-        if (hand.getAmount() == 1) player.getInventory().setItemInMainHand(null); else hand.setAmount(hand.getAmount() - 1);
+    private boolean hasItems(Player player, Material type, int amount) {
+        if (countItems(player, type) >= amount) return true;
+        player.sendMessage("§c필요한 재료가 부족합니다: " + type.name() + " x" + amount);
+        return false;
+    }
+
+    private int countItems(Player player, Material type) {
+        int count = 0;
+        for (ItemStack stack : player.getInventory().getStorageContents()) {
+            if (stack != null && stack.getType() == type) count += stack.getAmount();
+        }
+        return count;
+    }
+
+    private Map<UUID, Integer> reservedEyeCounts() {
+        Map<UUID, Integer> required = new HashMap<>();
+        for (UUID owner : pedestalDepositors.values()) required.merge(owner, 1, Integer::sum);
+        return required;
+    }
+
+    private boolean hasAllReservedMaterials() {
+        if (!eggPrepared || eggDepositor == null || usedPedestals.size() != 4 || pedestalDepositors.size() != 4) return false;
+        Player eggOwner = Bukkit.getPlayer(eggDepositor);
+        if (eggOwner == null || !eggOwner.isOnline() || countItems(eggOwner, Material.DRAGON_EGG) < 1) return false;
+        for (Map.Entry<UUID, Integer> entry : reservedEyeCounts().entrySet()) {
+            Player owner = Bukkit.getPlayer(entry.getKey());
+            if (owner == null || !owner.isOnline() || countItems(owner, Material.ENDER_EYE) < entry.getValue()) return false;
+        }
         return true;
+    }
+
+    private boolean consumeReservedMaterials() {
+        if (!hasAllReservedMaterials()) return false;
+        Player eggOwner = Bukkit.getPlayer(eggDepositor);
+        if (!removeItems(eggOwner, Material.DRAGON_EGG, 1)) return false;
+        for (Map.Entry<UUID, Integer> entry : reservedEyeCounts().entrySet()) {
+            Player owner = Bukkit.getPlayer(entry.getKey());
+            if (!removeItems(owner, Material.ENDER_EYE, entry.getValue())) {
+                getLogger().severe("예약된 엔더의 눈 소비 중 예기치 않은 인벤토리 변경이 발생했습니다.");
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private boolean removeItems(Player player, Material type, int amount) {
+        return player.getInventory().removeItem(new ItemStack(type, amount)).isEmpty();
+    }
+
+    private void clearPreparation(boolean removeVisualEgg) {
+        cancelRitual();
+        Location c = center();
+        if (removeVisualEgg && c != null) {
+            Block egg = c.getBlock().getRelative(BlockFace.UP);
+            if (egg.getType() == Material.DRAGON_EGG) egg.setType(Material.AIR, false);
+        }
+        eggPrepared = false;
+        eggDepositor = null;
+        usedPedestals.clear();
+        pedestalDepositors.clear();
     }
 
     private String pedestalDirection(Location clicked, Location c, int ignoredOffset) {
