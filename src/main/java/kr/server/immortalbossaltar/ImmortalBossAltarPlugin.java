@@ -70,6 +70,7 @@ public final class ImmortalBossAltarPlugin extends JavaPlugin implements Listene
     private final Map<UUID, Integer> escrowEyes = new HashMap<>();
     private final Map<UUID, Integer> escrowEggs = new HashMap<>();
     private boolean summonPromptSent;
+    private UUID summonPromptPlayer;
     private boolean ritualRunning;
     private boolean portalSuppressed;
     private boolean finalBossDefeated;
@@ -86,7 +87,7 @@ public final class ImmortalBossAltarPlugin extends JavaPlugin implements Listene
         if (getCommand("bossaltar") != null) getCommand("bossaltar").setExecutor(this);
         getServer().getPluginManager().registerEvents(this, this);
         recoverAfterEnable();
-        getLogger().info("ImmortalBossAltar 0.4.2 enabled. Persistent final-boss record: " + finalBossDefeated);
+        getLogger().info("ImmortalBossAltar 0.4.3 enabled. Persistent final-boss record: " + finalBossDefeated);
     }
 
     @Override public void onDisable() {
@@ -183,10 +184,17 @@ public final class ImmortalBossAltarPlugin extends JavaPlugin implements Listene
     }
 
     @Override public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
-        if (args.length == 0) { sender.sendMessage("§e/bossaltar <setcenter|status|reset|reload>"); return true; }
+        if (args.length == 0) { sender.sendMessage("§e/bossaltar <setcenter|setpedestal 1-4|status|summon|reset|reload>"); return true; }
         switch (args[0].toLowerCase(Locale.ROOT)) {
             case "status" -> showStatus(sender);
-            case "summon" -> { if (!(sender instanceof Player player)) { sender.sendMessage("플레이어만 소환을 확정할 수 있습니다."); return true; } beginRitual(player); }
+            case "summon" -> {
+                if (!(sender instanceof Player player)) { sender.sendMessage("플레이어만 소환을 확정할 수 있습니다."); return true; }
+                if (summonPromptPlayer == null || !summonPromptPlayer.equals(player.getUniqueId())) {
+                    player.sendMessage("§c네 번째 엔더의 눈을 마지막으로 봉헌한 플레이어만 소환을 확정할 수 있습니다.");
+                    return true;
+                }
+                beginRitual(player);
+            }
             case "setcenter" -> {
                 if (!(sender instanceof Player player) || !player.hasPermission("immortalbossaltar.admin")) { sender.sendMessage("§c관리자 플레이어만 사용할 수 있습니다."); return true; }
                 if (player.getWorld().getEnvironment() != World.Environment.THE_END) { msg(player, "end-only"); return true; }
@@ -202,13 +210,42 @@ public final class ImmortalBossAltarPlugin extends JavaPlugin implements Listene
                 getConfig().set("altar.center.x", c.getBlockX());
                 getConfig().set("altar.center.y", c.getBlockY());
                 getConfig().set("altar.center.z", c.getBlockZ());
-                discoverPedestals(c);
+                getConfig().set("altar.pedestals", null);
                 saveConfig();
-                if (!validateAltarStructure(c)) {
-                    msg(player, "center-saved-pedestals-missing", Map.of("missing", missingPedestalDirections(c)));
-                } else {
-                    msg(player, "center-set", Map.of("x", String.valueOf(c.getBlockX()), "y", String.valueOf(c.getBlockY()), "z", String.valueOf(c.getBlockZ())));
+                msg(player, "center-set", Map.of("x", String.valueOf(c.getBlockX()), "y", String.valueOf(c.getBlockY()), "z", String.valueOf(c.getBlockZ())));
+                player.sendMessage("§e받침대는 바라보는 기반암을 향해 /bossaltar setpedestal 1~4 명령어로 각각 지정하세요.");
+            }
+            case "setpedestal" -> {
+                if (!(sender instanceof Player player) || !player.hasPermission("immortalbossaltar.admin")) {
+                    sender.sendMessage("§c관리자 플레이어만 사용할 수 있습니다."); return true;
                 }
+                if (args.length != 2 || !List.of("1", "2", "3", "4").contains(args[1])) {
+                    player.sendMessage("§e사용법: 기반암을 바라보고 /bossaltar setpedestal 1|2|3|4"); return true;
+                }
+                Location c = center();
+                if (c == null || !player.getWorld().getUID().equals(c.getWorld().getUID())) {
+                    player.sendMessage("§c먼저 엔드에서 /bossaltar setcenter를 설정하세요."); return true;
+                }
+                Block target = player.getTargetBlockExact(6);
+                if (target == null || target.getType() != Material.BEDROCK) {
+                    player.sendMessage("§c등록할 받침대 기반암 블록을 정확히 바라봐야 합니다."); return true;
+                }
+                if (sameBlock(target, c.getBlock())) {
+                    player.sendMessage("§c중앙 기반암은 받침대로 등록할 수 없습니다."); return true;
+                }
+                String slot = args[1];
+                for (String other : List.of("1", "2", "3", "4")) {
+                    Location existing = getPedestalLocation(other);
+                    if (!other.equals(slot) && existing != null && sameBlock(target, existing.getBlock())) {
+                        player.sendMessage("§c이미 받침대 " + other + "번으로 등록된 블록입니다."); return true;
+                    }
+                }
+                String path = "altar.pedestals." + slot;
+                getConfig().set(path + ".x", target.getX());
+                getConfig().set(path + ".y", target.getY());
+                getConfig().set(path + ".z", target.getZ());
+                saveConfig();
+                player.sendMessage("§a받침대 " + slot + "번 등록 완료: " + target.getX() + ", " + target.getY() + ", " + target.getZ());
             }
             case "reset" -> {
                 if (!sender.hasPermission("immortalbossaltar.admin")) { sender.sendMessage("§c권한이 없습니다."); return true; }
@@ -221,7 +258,7 @@ public final class ImmortalBossAltarPlugin extends JavaPlugin implements Listene
                 if (!sender.hasPermission("immortalbossaltar.admin")) { sender.sendMessage("§c권한이 없습니다."); return true; }
                 reloadConfig(); sender.sendMessage("§a설정을 다시 불러왔습니다.");
             }
-            default -> sender.sendMessage("§e/bossaltar <setcenter|status|reset|reload>");
+            default -> sender.sendMessage("§e/bossaltar <setcenter|setpedestal 1-4|status|summon|reset|reload>");
         }
         return true;
     }
@@ -237,11 +274,11 @@ public final class ImmortalBossAltarPlugin extends JavaPlugin implements Listene
         if (c != null) {
             sender.sendMessage(color("status-pedestals", Map.of("pedestals", validateAltarStructure(c) ? "4곳 확인 완료" : "미확인 방향: " + missingPedestalDirections(c))));
             sender.sendMessage("§7제물 발광 액자: §f" + readyPedestalFrameCount(c) + "/4곳 (엔더의 눈 확인)");
-            for (String direction : List.of("N", "E", "S", "W")) {
+            for (String direction : List.of("1", "2", "3", "4")) {
                 Location pedestal = getPedestalLocation(direction);
                 String value = pedestal == null ? "미발견" : pedestal.getBlockX() + "," + pedestal.getBlockY() + "," + pedestal.getBlockZ()
                         + " (" + pedestal.getBlock().getType() + ")";
-                sender.sendMessage("§7받침대 " + direction + ": §f" + value);
+                sender.sendMessage("§7받침대 " + direction + "번: §f" + value);
             }
         }
         sender.sendMessage(color("status-vanilla", Map.of("vanilla", vanillaDragonDefeated ? "완료" : "미처치")));
@@ -465,7 +502,7 @@ public final class ImmortalBossAltarPlugin extends JavaPlugin implements Listene
         // to the exact configured pedestal by its distance from that block's
         // center instead. Pedestals are separated far enough that the 0.75
         // squared-distance limit cannot overlap neighboring directions.
-        for (String direction : List.of("N", "E", "S", "W")) {
+        for (String direction : List.of("1", "2", "3", "4")) {
             Location pedestal = getPedestalLocation(direction);
             if (pedestal == null || !pedestal.getWorld().getUID().equals(frameLocation.getWorld().getUID())) continue;
             Location blockCenter = pedestal.clone().add(.5, .5, .5);
@@ -493,7 +530,7 @@ public final class ImmortalBossAltarPlugin extends JavaPlugin implements Listene
 
     private int readyPedestalFrameCount(Location c) {
         int count = 0;
-        for (String direction : List.of("N", "E", "S", "W")) {
+        for (String direction : List.of("1", "2", "3", "4")) {
             if (pedestalFrameReady(direction)) count++;
         }
         return count;
@@ -501,11 +538,11 @@ public final class ImmortalBossAltarPlugin extends JavaPlugin implements Listene
 
     private String missingFrameDirections() {
         List<String> missing = new ArrayList<>();
-        for (String direction : List.of("N", "E", "S", "W")) {
+        for (String direction : List.of("1", "2", "3", "4")) {
             List<GlowItemFrame> frames = framesOnPedestal(direction);
-            if (frames.isEmpty()) missing.add(direction + ": 발광 액자 없음");
-            else if (frames.size() != 1) missing.add(direction + ": 액자 중복");
-            else if (frames.get(0).getItem().getType() != Material.ENDER_EYE) missing.add(direction + ": 엔더의 눈 없음");
+            if (frames.isEmpty()) missing.add(direction + "번: 발광 액자 없음");
+            else if (frames.size() != 1) missing.add(direction + "번: 액자 중복");
+            else if (frames.get(0).getItem().getType() != Material.ENDER_EYE) missing.add(direction + "번: 엔더의 눈 없음");
         }
         return missing.isEmpty() ? "없음" : String.join(", ", missing);
     }
@@ -514,7 +551,7 @@ public final class ImmortalBossAltarPlugin extends JavaPlugin implements Listene
         Location c = center();
         if (c == null) return false;
         List<GlowItemFrame> toRemove = new ArrayList<>();
-        for (String direction : List.of("N", "E", "S", "W")) {
+        for (String direction : List.of("1", "2", "3", "4")) {
             List<GlowItemFrame> frames = framesOnPedestal(direction);
             if (frames.size() != 1 || frames.get(0).getItem().getType() != Material.ENDER_EYE) return false;
             toRemove.add(frames.get(0));
@@ -533,14 +570,16 @@ public final class ImmortalBossAltarPlugin extends JavaPlugin implements Listene
     public void onPlayerJoin(PlayerJoinEvent event) { refundEscrowFor(event.getPlayer().getUniqueId()); }
 
     private void showSummonPromptIfReady(Player player) {
-        if (summonPromptSent || !eggPrepared || activeBoss != null || finalBossDefeated || !hasAllReservedMaterials()) return;
+        if (!eggPrepared || activeBoss != null || finalBossDefeated || !hasAllReservedMaterials()) return;
+        if (summonPromptSent) return;
         summonPromptSent = true;
+        summonPromptPlayer = player.getUniqueId();
         player.sendMessage(Component.text("[불멸의 제단] ", NamedTextColor.DARK_PURPLE)
                 .append(Component.text("제단이 준비되었습니다! ", NamedTextColor.GREEN))
-                .append(Component.text("고대의 파멸룡을 소환하시겠습니까? ", NamedTextColor.WHITE))
+                .append(Component.text("네 번째 엔더의 눈을 봉헌한 사람이 소환을 확정할 수 있습니다. ", NamedTextColor.WHITE))
                 .append(Component.text("[소환하기]", NamedTextColor.GOLD)
                         .clickEvent(ClickEvent.runCommand("/bossaltar summon"))
-                        .hoverEvent(HoverEvent.showText(Component.text("클릭하면 소환 의식이 시작됩니다.")))));
+                        .hoverEvent(HoverEvent.showText(Component.text("이 메시지를 받은 플레이어만 소환할 수 있습니다.")))));
     }
 
     private void refundEscrowFor(UUID id) {
@@ -579,7 +618,7 @@ public final class ImmortalBossAltarPlugin extends JavaPlugin implements Listene
         if (getConfig().getBoolean("altar.require-bedrock-support", true) && c.getBlock().getType() != Material.BEDROCK) return false;
         if (!c.getBlock().getRelative(BlockFace.UP).isEmpty()
                 && c.getBlock().getRelative(BlockFace.UP).getType() != Material.DRAGON_EGG) return false;
-        for (String direction : List.of("N", "E", "S", "W")) {
+        for (String direction : List.of("1", "2", "3", "4")) {
             Location pedestal = getPedestalLocation(direction);
             if (pedestal == null || pedestal.getWorld() == null || !pedestal.getWorld().getUID().equals(c.getWorld().getUID())
                     || pedestal.getBlock().getType() != Material.BEDROCK) return false;
@@ -587,41 +626,6 @@ public final class ImmortalBossAltarPlugin extends JavaPlugin implements Listene
         return true;
     }
 
-    private void discoverPedestals(Location center) {
-        // The End exit fountain has a raised central pillar and a lower bedrock
-        // rim. Search each cardinal axis independently, allowing vertical
-        // offsets, and store the actual block coordinates.
-        int maxRadius = Math.max(3, getConfig().getInt("altar.pedestal-search-radius", 5));
-        int minY = getConfig().getInt("altar.pedestal-search-min-y", -5);
-        int maxY = getConfig().getInt("altar.pedestal-search-max-y", 2);
-        for (String direction : List.of("N", "E", "S", "W")) {
-            Location best = null;
-            int bestScore = Integer.MAX_VALUE;
-            for (int radius = 1; radius <= maxRadius; radius++) {
-                int dx = direction.equals("E") ? radius : direction.equals("W") ? -radius : 0;
-                int dz = direction.equals("S") ? radius : direction.equals("N") ? -radius : 0;
-                for (int dy = minY; dy <= maxY; dy++) {
-                    int x = center.getBlockX() + dx;
-                    int y = center.getBlockY() + dy;
-                    int z = center.getBlockZ() + dz;
-                    if (center.getWorld().getBlockAt(x, y, z).getType() != Material.BEDROCK) continue;
-                    int score = radius * 10 + Math.abs(dy) * 3;
-                    if (score < bestScore) {
-                        bestScore = score;
-                        best = new Location(center.getWorld(), x, y, z);
-                    }
-                }
-            }
-            String path = "altar.pedestals." + direction;
-            if (best == null) {
-                getConfig().set(path, null);
-            } else {
-                getConfig().set(path + ".x", best.getBlockX());
-                getConfig().set(path + ".y", best.getBlockY());
-                getConfig().set(path + ".z", best.getBlockZ());
-            }
-        }
-    }
 
     private Location getPedestalLocation(String direction) {
         String path = "altar.pedestals." + direction;
@@ -634,10 +638,10 @@ public final class ImmortalBossAltarPlugin extends JavaPlugin implements Listene
 
     private String missingPedestalDirections(Location center) {
         List<String> missing = new ArrayList<>();
-        for (String direction : List.of("N", "E", "S", "W")) {
+        for (String direction : List.of("1", "2", "3", "4")) {
             Location pedestal = getPedestalLocation(direction);
             if (pedestal == null || !pedestal.getWorld().getUID().equals(center.getWorld().getUID())
-                    || pedestal.getBlock().getType() != Material.BEDROCK) missing.add(direction);
+                    || pedestal.getBlock().getType() != Material.BEDROCK) missing.add(direction + "번");
         }
         return missing.isEmpty() ? "-" : String.join(", ", missing);
     }
@@ -833,7 +837,7 @@ public final class ImmortalBossAltarPlugin extends JavaPlugin implements Listene
                 || c.getBlock().getRelative(BlockFace.UP).getType() != Material.DRAGON_EGG) return false;
         int totalEggs = escrowEggs.values().stream().mapToInt(Integer::intValue).sum();
         if (totalEggs != 1) return false;
-        for (String direction : List.of("N", "E", "S", "W")) {
+        for (String direction : List.of("1", "2", "3", "4")) {
             if (!pedestalFrameReady(direction)) return false;
         }
         return true;
@@ -874,11 +878,11 @@ public final class ImmortalBossAltarPlugin extends JavaPlugin implements Listene
             Block egg = c.getBlock().getRelative(BlockFace.UP);
             if (egg.getType() == Material.DRAGON_EGG) egg.setType(Material.AIR, false);
         }
-        eggPrepared = false; eggDepositor = null; usedPedestals.clear(); pedestalDepositors.clear(); summonPromptSent = false;
+        eggPrepared = false; eggDepositor = null; usedPedestals.clear(); pedestalDepositors.clear(); summonPromptSent = false; summonPromptPlayer = null;
     }
 
     private String pedestalDirection(Location clicked, Location c, int ignoredOffset) {
-        for (String direction : List.of("N", "E", "S", "W")) {
+        for (String direction : List.of("1", "2", "3", "4")) {
             Location pedestal = getPedestalLocation(direction);
             if (pedestal != null && pedestal.getWorld().getUID().equals(clicked.getWorld().getUID())
                     && pedestal.getBlockX() == clicked.getBlockX()
