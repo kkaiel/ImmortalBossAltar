@@ -1,4 +1,4 @@
-# ImmortalBossAltar 0.2.0
+# ImmortalBossAltar 0.2.1
 # setcenter: stand in the End and look directly at the central pillar's
 # top BEDROCK support block, then run /bossaltar setcenter. That bedrock
 # coordinate is stored; the dragon egg is placed in the air block above it.
@@ -6,7 +6,10 @@ altar:
   world: ''
   center: { x: 0, y: 0, z: 0 }
   pedestal-material: BEDROCK
-  pedestal-offset: 2
+  # Search real bedrock blocks along each cardinal direction around the raised center.
+  pedestal-search-radius: 5
+  pedestal-search-min-y: -5
+  pedestal-search-max-y: 2
   # Pedestal blocks are at the same Y as the egg's block position.
   ritual-seconds: 10
   require-bedrock-support: true
@@ -28,7 +31,9 @@ messages:
   end-only: '&c엔드에서만 사용할 수 있습니다.'
   center-set: '&a제단 알 위치를 저장했습니다: {x}, {y}, {z}. 중앙 기둥 위 공중 블록입니다.'
   center-target: '&c중앙 기둥의 맨 위 받침 블록을 바라보고 다시 실행하세요.'
-  structure-invalid: '&c제단 구조가 올바르지 않습니다. 중앙 아래와 동서남북 받침대가 지정된 블록인지 확인하세요.'
+  structure-invalid: '&c제단 구조가 올바르지 않습니다. 동서남북 기반암 받침대 좌표를 확인하세요.'
+  center-saved-pedestals-missing: '&e중앙 위치는 저장했지만 받침대를 모두 찾지 못했습니다. 찾지 못한 방향: {missing}. status에서 감지 좌표를 확인하세요.'
+  status-pedestals: '&7받침대 감지: &f{pedestals}'
   dragon-not-defeated: '&c바닐라 엔더 드래곤을 먼저 처치해야 합니다.'
   vanilla-dragon-alive: '&c바닐라 엔더 드래곤이 살아 있어 소환할 수 없습니다.'
   egg-placed: '&d용의 알이 중앙에 안치되었습니다. 네 방향 받침대에 엔더의 눈을 바치세요.'

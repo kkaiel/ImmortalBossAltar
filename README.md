@@ -1,4 +1,4 @@
-# ImmortalBossAltar 0.2.0
+# ImmortalBossAltar 0.2.1
 
 Separate Paper plugin for the End altar and MythicMobs `AncientDoomDragon` encounter.
 
@@ -12,7 +12,7 @@ Separate Paper plugin for the End altar and MythicMobs `AncientDoomDragon` encou
 ## Install
 
 1. Build with `gradle clean build` or download the Actions artifact.
-2. Put `build/libs/ImmortalBossAltar-0.2.0.jar` into `plugins/`.
+2. Put `build/libs/ImmortalBossAltar-0.2.1.jar` into `plugins/`.
 3. Ensure MythicMobs loads the existing `AncientDoomDragon` mob and `EndDoomScoreSword` item.
 4. Restart the server.
 
@@ -21,10 +21,11 @@ Separate Paper plugin for the End altar and MythicMobs `AncientDoomDragon` encou
 1. Go to the End exit fountain.
 2. Aim at the TOP BEDROCK SUPPORT BLOCK of the central pillar and run `/bossaltar setcenter`.
 3. The plugin stores the air block directly above that support block as the dragon-egg position.
-4. The four eye pedestals are the BEDROCK blocks at cardinal offsets configured by `altar.pedestal-offset` (default 2), at the same Y as the egg position.
+4. The plugin scans each cardinal direction for the nearest BEDROCK block within the configured horizontal radius and vertical range (`altar.pedestal-search-radius`, `altar.pedestal-search-min-y`, `altar.pedestal-search-max-y`). This accommodates the End fountain's raised center and lower surrounding bedrock rim.
+5. `/bossaltar status` prints the four detected pedestal coordinates and block types. Check these coordinates against the actual fountain before inserting any items.
 5. The plugin never replaces the pedestal or support bedrock. It only places/removes the dragon egg in the configured air block.
 
-If `/bossaltar setcenter` reports an invalid structure, do not force the ritual. Adjust `altar.pedestal-offset` or `altar.pedestal-material` only after visually checking the exact fountain coordinates.
+If `/bossaltar setcenter` cannot find all four pedestals, do not force the ritual. Review the coordinates shown by `/bossaltar status`; the scan is a heuristic and must be visually checked before any materials are inserted.
 
 ## Commands
 

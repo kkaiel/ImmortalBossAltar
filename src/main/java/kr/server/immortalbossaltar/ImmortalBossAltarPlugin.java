@@ -152,16 +152,21 @@ public final class ImmortalBossAltarPlugin extends JavaPlugin implements Listene
                 if (support == null || support.getType() != Material.BEDROCK) { msg(player, "center-target"); return true; }
                 Block eggSpace = support.getRelative(BlockFace.UP);
                 if (!eggSpace.isEmpty()) { msg(player, "center-target"); return true; }
-                // Store the central support BEDROCK coordinate. The dragon egg
-                // occupies the air block directly above it.
+                // Store the central support BEDROCK coordinate. Pedestals are
+                // discovered from the real fountain geometry instead of assuming
+                // they are exactly two blocks away at the same Y level.
                 Location c = support.getLocation();
                 getConfig().set("altar.world", c.getWorld().getName());
                 getConfig().set("altar.center.x", c.getBlockX());
                 getConfig().set("altar.center.y", c.getBlockY());
                 getConfig().set("altar.center.z", c.getBlockZ());
+                discoverPedestals(c);
                 saveConfig();
-                if (!validateAltarStructure(c)) msg(player, "structure-invalid");
-                else msg(player, "center-set", Map.of("x", String.valueOf(c.getBlockX()), "y", String.valueOf(c.getBlockY()), "z", String.valueOf(c.getBlockZ())));
+                if (!validateAltarStructure(c)) {
+                    msg(player, "center-saved-pedestals-missing", Map.of("missing", missingPedestalDirections(c)));
+                } else {
+                    msg(player, "center-set", Map.of("x", String.valueOf(c.getBlockX()), "y", String.valueOf(c.getBlockY()), "z", String.valueOf(c.getBlockZ())));
+                }
             }
             case "reset" -> {
                 if (!sender.hasPermission("immortalbossaltar.admin")) { sender.sendMessage("§c권한이 없습니다."); return true; }
@@ -188,6 +193,15 @@ public final class ImmortalBossAltarPlugin extends JavaPlugin implements Listene
         sender.sendMessage(color("status-header", Map.of()));
         sender.sendMessage(color("status-world", Map.of("world", world)));
         sender.sendMessage(color("status-altar", Map.of("altar", altar)));
+        if (c != null) {
+            sender.sendMessage(color("status-pedestals", Map.of("pedestals", validateAltarStructure(c) ? "4곳 확인 완료" : "미확인 방향: " + missingPedestalDirections(c))));
+            for (String direction : List.of("N", "E", "S", "W")) {
+                Location pedestal = getPedestalLocation(direction);
+                String value = pedestal == null ? "미발견" : pedestal.getBlockX() + "," + pedestal.getBlockY() + "," + pedestal.getBlockZ()
+                        + " (" + pedestal.getBlock().getType() + ")";
+                sender.sendMessage("§7받침대 " + direction + ": §f" + value);
+            }
+        }
         sender.sendMessage(color("status-vanilla", Map.of("vanilla", vanillaDragonDefeated ? "완료" : "미처치")));
         sender.sendMessage(color("status-boss", Map.of("boss", boss)));
         sender.sendMessage(color("status-final", Map.of("final", finalBossDefeated ? "§a완료" : "§c미처치")));
@@ -255,14 +269,69 @@ public final class ImmortalBossAltarPlugin extends JavaPlugin implements Listene
 
     private boolean validateAltarStructure(Location c) {
         if (getConfig().getBoolean("altar.require-bedrock-support", true) && c.getBlock().getType() != Material.BEDROCK) return false;
-        Material pedestal = Material.matchMaterial(getConfig().getString("altar.pedestal-material", "BEDROCK"));
-        if (pedestal == null) return false;
-        int d = getConfig().getInt("altar.pedestal-offset", 2);
-        return c.getWorld().getBlockAt(c.getBlockX(), c.getBlockY() + 1, c.getBlockZ()).isEmpty()
-                && c.getWorld().getBlockAt(c.getBlockX(), c.getBlockY(), c.getBlockZ() - d).getType() == pedestal
-                && c.getWorld().getBlockAt(c.getBlockX() + d, c.getBlockY(), c.getBlockZ()).getType() == pedestal
-                && c.getWorld().getBlockAt(c.getBlockX(), c.getBlockY(), c.getBlockZ() + d).getType() == pedestal
-                && c.getWorld().getBlockAt(c.getBlockX() - d, c.getBlockY(), c.getBlockZ()).getType() == pedestal;
+        if (!c.getBlock().getRelative(BlockFace.UP).isEmpty()
+                && c.getBlock().getRelative(BlockFace.UP).getType() != Material.DRAGON_EGG) return false;
+        for (String direction : List.of("N", "E", "S", "W")) {
+            Location pedestal = getPedestalLocation(direction);
+            if (pedestal == null || pedestal.getWorld() == null || !pedestal.getWorld().getUID().equals(c.getWorld().getUID())
+                    || pedestal.getBlock().getType() != Material.BEDROCK) return false;
+        }
+        return true;
+    }
+
+    private void discoverPedestals(Location center) {
+        // The End exit fountain has a raised central pillar and a lower bedrock
+        // rim. Search each cardinal axis independently, allowing vertical
+        // offsets, and store the actual block coordinates.
+        int maxRadius = Math.max(3, getConfig().getInt("altar.pedestal-search-radius", 5));
+        int minY = getConfig().getInt("altar.pedestal-search-min-y", -5);
+        int maxY = getConfig().getInt("altar.pedestal-search-max-y", 2);
+        for (String direction : List.of("N", "E", "S", "W")) {
+            Location best = null;
+            int bestScore = Integer.MAX_VALUE;
+            for (int radius = 1; radius <= maxRadius; radius++) {
+                int dx = direction.equals("E") ? radius : direction.equals("W") ? -radius : 0;
+                int dz = direction.equals("S") ? radius : direction.equals("N") ? -radius : 0;
+                for (int dy = minY; dy <= maxY; dy++) {
+                    int x = center.getBlockX() + dx;
+                    int y = center.getBlockY() + dy;
+                    int z = center.getBlockZ() + dz;
+                    if (center.getWorld().getBlockAt(x, y, z).getType() != Material.BEDROCK) continue;
+                    int score = radius * 10 + Math.abs(dy) * 3;
+                    if (score < bestScore) {
+                        bestScore = score;
+                        best = new Location(center.getWorld(), x, y, z);
+                    }
+                }
+            }
+            String path = "altar.pedestals." + direction;
+            if (best == null) {
+                getConfig().set(path, null);
+            } else {
+                getConfig().set(path + ".x", best.getBlockX());
+                getConfig().set(path + ".y", best.getBlockY());
+                getConfig().set(path + ".z", best.getBlockZ());
+            }
+        }
+    }
+
+    private Location getPedestalLocation(String direction) {
+        String path = "altar.pedestals." + direction;
+        if (!getConfig().contains(path + ".x") || !getConfig().contains(path + ".y") || !getConfig().contains(path + ".z")) return null;
+        String worldName = getConfig().getString("altar.world", "");
+        World world = Bukkit.getWorld(worldName);
+        if (world == null) return null;
+        return new Location(world, getConfig().getInt(path + ".x"), getConfig().getInt(path + ".y"), getConfig().getInt(path + ".z"));
+    }
+
+    private String missingPedestalDirections(Location center) {
+        List<String> missing = new ArrayList<>();
+        for (String direction : List.of("N", "E", "S", "W")) {
+            Location pedestal = getPedestalLocation(direction);
+            if (pedestal == null || !pedestal.getWorld().getUID().equals(center.getWorld().getUID())
+                    || pedestal.getBlock().getType() != Material.BEDROCK) missing.add(direction);
+        }
+        return missing.isEmpty() ? "-" : String.join(", ", missing);
     }
 
     private void beginRitual(Player initiator) {
@@ -281,14 +350,8 @@ public final class ImmortalBossAltarPlugin extends JavaPlugin implements Listene
     }
 
     private boolean validateAltarStructureWithEgg(Location c) {
-        if (c.getBlock().getRelative(BlockFace.UP).getType() != Material.DRAGON_EGG) return false;
-        Material pedestal = Material.matchMaterial(getConfig().getString("altar.pedestal-material", "BEDROCK"));
-        int d = getConfig().getInt("altar.pedestal-offset", 2);
-        return pedestal != null
-                && c.getWorld().getBlockAt(c.getBlockX(), c.getBlockY(), c.getBlockZ() - d).getType() == pedestal
-                && c.getWorld().getBlockAt(c.getBlockX() + d, c.getBlockY(), c.getBlockZ()).getType() == pedestal
-                && c.getWorld().getBlockAt(c.getBlockX(), c.getBlockY(), c.getBlockZ() + d).getType() == pedestal
-                && c.getWorld().getBlockAt(c.getBlockX() - d, c.getBlockY(), c.getBlockZ()).getType() == pedestal;
+        return c.getBlock().getRelative(BlockFace.UP).getType() == Material.DRAGON_EGG
+                && validateAltarStructure(c);
     }
 
     private void spawnMythicBoss(Location c) {
@@ -397,11 +460,15 @@ public final class ImmortalBossAltarPlugin extends JavaPlugin implements Listene
         return true;
     }
 
-    private String pedestalDirection(Location l, Location c, int d) {
-        int dx = l.getBlockX() - c.getBlockX(), dz = l.getBlockZ() - c.getBlockZ(), dy = l.getBlockY() - c.getBlockY();
-        if (dy != 0) return null;
-        if (dx == 0 && dz == -d) return "N"; if (dx == d && dz == 0) return "E";
-        if (dx == 0 && dz == d) return "S"; if (dx == -d && dz == 0) return "W"; return null;
+    private String pedestalDirection(Location clicked, Location c, int ignoredOffset) {
+        for (String direction : List.of("N", "E", "S", "W")) {
+            Location pedestal = getPedestalLocation(direction);
+            if (pedestal != null && pedestal.getWorld().getUID().equals(clicked.getWorld().getUID())
+                    && pedestal.getBlockX() == clicked.getBlockX()
+                    && pedestal.getBlockY() == clicked.getBlockY()
+                    && pedestal.getBlockZ() == clicked.getBlockZ()) return direction;
+        }
+        return null;
     }
 
     private Location center() {
