@@ -1,4 +1,4 @@
-# ImmortalBossAltar 0.4.0
+# ImmortalBossAltar 0.4.1
 # setcenter: stand in the End and look directly at the central pillar's
 # top BEDROCK support block, then run /bossaltar setcenter. That bedrock
 # coordinate is stored; the dragon egg is placed in the air block above it.
@@ -37,11 +37,11 @@ messages:
   status-pedestals: '&7받침대 감지: &f{pedestals}'
   dragon-not-defeated: '&c바닐라 엔더 드래곤을 먼저 처치해야 합니다.'
   vanilla-dragon-alive: '&c바닐라 엔더 드래곤이 살아 있어 소환할 수 없습니다.'
-  egg-reserved: '&d용의 알을 제단에 예약했습니다. 소환 성공 전까지 인벤토리에서 소비되지 않습니다.'
+  egg-reserved: '&d용의 알을 제단에 바쳤습니다. 인벤토리에서 1개가 소모되며 소환 취소 시 반환됩니다.'
   eye-reserved: '&d받침대가 활성화되었습니다. (&f{count}/4&d) 엔더의 눈 1개가 제단에 바쳐졌습니다.'
   ritual-start: '&5소환 의식이 시작됩니다. 잠시 기다려 주세요.'
   reservation-missing: '&c예약한 재료가 인벤토리에 없습니다. 제단 준비를 취소했습니다. 재료는 소비되지 않았습니다.'
-  ritual-cancelled-safe: '&e의식이 취소되었습니다. 예약 재료는 인벤토리에 그대로 있습니다.'
+  ritual-cancelled-safe: '&e의식이 취소되었습니다. 바친 용의 알과 엔더의 눈은 반환됩니다.'
   altar-incomplete: '&c용의 알과 네 개의 엔더의 눈을 먼저 준비해야 합니다.'
   boss-spawned: '&5고대의 파멸룡이 깨어났습니다!'
   boss-defeated: '&6고대의 파멸룡이 쓰러졌습니다!'
